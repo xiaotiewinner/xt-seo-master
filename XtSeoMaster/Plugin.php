@@ -9,10 +9,10 @@
  *  <li>JSON-LD 结构化数据（Article / BreadcrumbList / WebSite）</li>
  *  <li>Sitemap XML 动态生成</li>
  *  <li>Robots.txt 生成</li>
- *  <li>后台 SEO 评分面板</li>
+ *  <li>文章编辑 SEO 评分面板</li>
  *  <li>AMP/MIP</li>
  *  <li>Index主动推送（百度普通推送、百度快速收录、IndexNow）</li>
- *  <li>推送记录</li>
+ *  <li>推送管理</li>
  * </ul>
  *
  * @package   XtSeoMaster
@@ -232,9 +232,9 @@ class XtSeoMaster_Plugin implements Typecho_Plugin_Interface
             '__cloudServerAd',
             null,
             '祝你开心愉快！',
-            _t('<a style="font-weight:bold;color:red;" href="https://www.rainyun.com/xiaotie_" target="_blank" rel="noopener noreferrer">云服务器推荐：2H2G100M 30元/月</a>')
+            _t('<a style="font-weight:bold;color:red;text-decoration:underline;" href="https://www.rainyun.com/xiaotie_" target="_blank" rel="noopener noreferrer">云服务器推荐：2H2G100M 30元/月</a><br><a style="font-weight:bold;color:red;text-decoration:underline;" href="https://www.xiaotiewinner.com/2025/vps-tuijian.html" target="_blank" rel="noopener noreferrer">其他云服务器推荐</a>')
         );
-        $cloudAd->input->setAttribute('readonly', 'readonly');
+        $cloudAd->input->setAttribute('display', 'none');
         $form->addInput($cloudAd);
 
         $groupEntry = new Typecho_Widget_Helper_Form_Element_Text(
@@ -878,6 +878,8 @@ class XtSeoMaster_Plugin implements Typecho_Plugin_Interface
 
         // 兼容部分主题未调用 $this->header()：在前端运行时兜底补齐 description/keywords
         self::emitHeadMetaCompatScript($archive);
+        // 前台控制台签名
+        self::emitConsoleSignatureScript();
     }
 
     public static function bootstrapHeadFallback($archive)
@@ -944,6 +946,14 @@ class XtSeoMaster_Plugin implements Typecho_Plugin_Interface
             . 'if(!m){m=d.createElement("meta");m.setAttribute("name",n);h.appendChild(m);}if(!m.getAttribute("content")){m.setAttribute("content",v);}}'
             . 'ensureMeta("description",' . $descJs . ');'
             . 'ensureMeta("keywords",' . $kwJs . ');'
+            . '})();</script>' . "\n";
+    }
+
+    private static function emitConsoleSignatureScript()
+    {
+        echo '<script>(function(){'
+            . 'if(typeof console==="undefined"||typeof console.log!=="function"){return;}'
+            . 'console.log("\\n %c XtSeoMaster v1.0.0 %c for www.xiaotiewinner.com","color:#777;background:linear-gradient(90deg,#dbeafe,#e0e7ff,#f5d0fe);padding:6px 10px;border-radius:6px 0 0 6px;font-weight:600;","color:#64748b;background:#f8fafc;padding:6px 12px;border-radius:0 6px 6px 0;");'
             . '})();</script>' . "\n";
     }
 
