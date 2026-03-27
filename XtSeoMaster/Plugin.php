@@ -884,6 +884,31 @@ class XtSeoMaster_Plugin implements Typecho_Plugin_Interface
 
     public static function bootstrapHeadFallback($archive)
     {
+        // 仅前台 GET 页面启用输出缓冲兜底，避免影响后台发布/保存请求
+        if (isset($_SERVER['REQUEST_METHOD']) && strtoupper((string) $_SERVER['REQUEST_METHOD']) !== 'GET') {
+            return;
+        }
+        if (self::isAdminRequest()) {
+            return;
+        }
+        if (!is_object($archive) || !method_exists($archive, 'is')) {
+            return;
+        }
+        try {
+            $isFrontArchive = $archive->is('single')
+                || $archive->is('index')
+                || $archive->is('page')
+                || $archive->is('category')
+                || $archive->is('tag')
+                || $archive->is('author')
+                || $archive->is('search');
+            if (!$isFrontArchive) {
+                return;
+            }
+        } catch (Exception $e) {
+            return;
+        }
+
         if (self::$headBufferStarted) {
             return;
         }
@@ -957,166 +982,164 @@ class XtSeoMaster_Plugin implements Typecho_Plugin_Interface
             . '})();</script>' . "\n";
     }
 
+    private static function isAdminRequest()
+    {
+        $requestUri = isset($_SERVER['REQUEST_URI']) ? (string) $_SERVER['REQUEST_URI'] : '';
+        if ($requestUri === '') {
+            return false;
+        }
+        $adminDir = defined('__TYPECHO_ADMIN_DIR__') ? trim((string) __TYPECHO_ADMIN_DIR__, '/\\') : 'admin';
+        if ($adminDir === '') {
+            $adminDir = 'admin';
+        }
+        return strpos($requestUri, '/' . $adminDir . '/') !== false
+            || preg_match('#/' . preg_quote($adminDir, '#') . '(\.php)?(\?|$)#i', $requestUri) === 1;
+    }
+
     // ─── 保存自定义 SEO 字段 ──────────────────────────────────────────────────
 
     public static function saveFields($contents, $class)
     {
-        $request = $class->request;
-
-        $postedFields = (is_array($_POST) && isset($_POST['fields']) && is_array($_POST['fields']))
-            ? $_POST['fields']
-            : array();
-        $hasDesc = array_key_exists('description', $postedFields)
-            || (is_array($_POST) && array_key_exists('description', $_POST))
-            || (is_array($_POST) && array_key_exists('seo_desc', $_POST));
-        $hasKeywords = array_key_exists('keywords', $postedFields)
-            || (is_array($_POST) && array_key_exists('keywords', $_POST))
-            || (is_array($_POST) && array_key_exists('seo_keywords', $_POST));
-        if (!$hasDesc && !$hasKeywords) {
-            return;
-        }
-
-        $descValue = $hasDesc
-            ? (isset($postedFields['description']) ? $postedFields['description'] : (is_array($_POST) && array_key_exists('description', $_POST) ? $_POST['description'] : $request->get('seo_desc', '')))
-            : null;
-        $keywordsValue = $hasKeywords
-            ? (isset($postedFields['keywords']) ? $postedFields['keywords'] : (is_array($_POST) && array_key_exists('keywords', $_POST) ? $_POST['keywords'] : $request->get('seo_keywords', '')))
-            : null;
-
-        // cid 在 write 回调中由 $contents['cid'] 提供
-        $cid = isset($contents['cid']) ? intval($contents['cid']) : 0;
-        if (!$cid) {
-            return;
-        }
-
-        $db = Typecho_Db::get();
-
-        // 辅助：更新或插入自定义字段
-        $upsertField = function ($name, $value) use ($db, $cid) {
-            $exist = $db->fetchRow(
-                $db->select('cid')->from('table.fields')
-                   ->where('cid = ?', $cid)
-                   ->where('name = ?', $name)
-            );
-            if ($exist) {
-                $db->query(
-                    $db->update('table.fields')
-                       ->rows(array('str_value' => $value, 'type' => 'str'))
-                       ->where('cid = ?', $cid)
-                       ->where('name = ?', $name)
-                );
-            } else {
-                $db->query(
-                    $db->insert('table.fields')
-                       ->rows(array(
-                           'cid'       => $cid,
-                           'name'      => $name,
-                           'type'      => 'str',
-                           'str_value' => $value,
-                           'int_value' => 0,
-                           'float_value' => 0,
-                       ))
-                );
-            }
-        };
-
-        if ($hasDesc) {
-            $upsertField('description', trim((string) $descValue));
-        }
-        if ($hasKeywords) {
-            $upsertField('keywords', trim((string) $keywordsValue));
-        }
+        // 发布保护：
+        // write 钩子必须返回 $contents，避免影响 Typecho 核心发布流程。
+        // 插件不在此处修改请求数据或执行数据库写入。
+        return $contents;
     }
 
     // ─── 发布/更新触发：主动推送 ────────────────────────────────────────────────
 
     public static function onPostPublish()
     {
-        self::handlePushTrigger(func_get_args(), 'post');
+        self::handlePushTriggerSafe(func_get_args(), 'post');
     }
 
     public static function onPostSave()
     {
-        self::handlePushTrigger(func_get_args(), 'post');
+        self::handlePushTriggerSafe(func_get_args(), 'post');
     }
 
     public static function onPagePublish()
     {
-        self::handlePushTrigger(func_get_args(), 'page');
+        self::handlePushTriggerSafe(func_get_args(), 'page');
     }
 
     public static function onPageSave()
     {
-        self::handlePushTrigger(func_get_args(), 'page');
+        self::handlePushTriggerSafe(func_get_args(), 'page');
+    }
+
+    private static function handlePushTriggerSafe($args, $fallbackType)
+    {
+        try {
+            self::handlePushTrigger($args, $fallbackType);
+        } catch (Exception $e) {
+            // 最外层兜底：推送异常绝不阻断发布/保存流程
+            try {
+                $row = self::normalizeHookContentRow($args, $fallbackType);
+                $siteUrl = rtrim(Helper::options()->siteUrl, '/') . '/';
+                $url = (!empty($row['cid'])) ? self::buildContentPermalink($row, $siteUrl) : '';
+                $repo = new XtSeoMaster_QueueRepository();
+                $repo->logPushResult(
+                    0,
+                    'system',
+                    (string) $url,
+                    '',
+                    0,
+                    '',
+                    false,
+                    'push trigger exception: ' . $e->getMessage()
+                );
+            } catch (Exception $ignored) {
+            }
+        }
     }
 
     private static function handlePushTrigger($args, $fallbackType)
     {
+        $url = '';
         try {
-            $options = Helper::options()->plugin('XtSeoMaster');
-        } catch (Exception $e) {
-            return;
-        }
-
-        if (!isset($options->enablePush) || $options->enablePush != '1') {
-            return;
-        }
-
-        $row = self::normalizeHookContentRow($args, $fallbackType);
-        if (empty($row) || empty($row['cid'])) {
-            return;
-        }
-        if (!isset($row['status']) || $row['status'] !== 'publish') {
-            return;
-        }
-
-        $siteUrl = rtrim(Helper::options()->siteUrl, '/') . '/';
-        $url = self::buildContentPermalink($row, $siteUrl);
-        if ($url === '') {
-            return;
-        }
-
-        $engines = XtSeoMaster_PushService::enabledEngines($options);
-        if (empty($engines)) {
-            return;
-        }
-
-        $repo = new XtSeoMaster_QueueRepository();
-        $pushMode = isset($options->pushMode) ? trim((string) $options->pushMode) : 'realtime';
-        // Only explicit "realtime" can trigger publish-time push.
-        // Any unknown/legacy values should behave as manual mode.
-        if ($pushMode !== 'realtime') {
-            return;
-        }
-
-        foreach ($engines as $engine) {
             try {
-                $result = XtSeoMaster_PushService::pushUrl($engine, $url, $options, $siteUrl);
-                $repo->logPushResult(
-                    0,
-                    $engine,
-                    $url,
-                    $result['request_payload'],
-                    $result['http_code'],
-                    $result['response'],
-                    !empty($result['success']),
-                    $result['error']
-                );
+                $options = Helper::options()->plugin('XtSeoMaster');
             } catch (Exception $e) {
-                // Never break publish/save flow because of push failure.
+                return;
+            }
+
+            if (!isset($options->enablePush) || $options->enablePush != '1') {
+                return;
+            }
+
+            $row = self::normalizeHookContentRow($args, $fallbackType);
+            if (empty($row) || empty($row['cid'])) {
+                return;
+            }
+            if (!isset($row['status']) || $row['status'] !== 'publish') {
+                return;
+            }
+
+            $siteUrl = rtrim(Helper::options()->siteUrl, '/') . '/';
+            $url = self::buildContentPermalink($row, $siteUrl);
+            if ($url === '') {
+                return;
+            }
+
+            $engines = XtSeoMaster_PushService::enabledEngines($options);
+            if (empty($engines)) {
+                return;
+            }
+
+            $repo = new XtSeoMaster_QueueRepository();
+            $pushMode = isset($options->pushMode) ? trim((string) $options->pushMode) : 'realtime';
+            // Only explicit "realtime" can trigger publish-time push.
+            // Any unknown/legacy values should behave as manual mode.
+            if ($pushMode !== 'realtime') {
+                return;
+            }
+
+            foreach ($engines as $engine) {
                 try {
+                    $result = XtSeoMaster_PushService::pushUrl($engine, $url, $options, $siteUrl);
                     $repo->logPushResult(
                         0,
                         $engine,
                         $url,
-                        '',
-                        0,
-                        '',
-                        false,
-                        'push exception: ' . $e->getMessage()
+                        $result['request_payload'],
+                        $result['http_code'],
+                        $result['response'],
+                        !empty($result['success']),
+                        $result['error']
                     );
-                } catch (Exception $ignored) {
+                } catch (Exception $e) {
+                    // Never break publish/save flow because of push failure.
+                    try {
+                        $repo->logPushResult(
+                            0,
+                            $engine,
+                            $url,
+                            '',
+                            0,
+                            '',
+                            false,
+                            'push exception: ' . $e->getMessage()
+                        );
+                    } catch (Exception $ignored) {
+                    }
                 }
+            }
+        } catch (Exception $e) {
+            // 次级兜底：handlePushTrigger 内部任何异常都降级为日志，不向上抛出
+            try {
+                $repo = new XtSeoMaster_QueueRepository();
+                $repo->logPushResult(
+                    0,
+                    'system',
+                    (string) $url,
+                    '',
+                    0,
+                    '',
+                    false,
+                    'push flow exception: ' . $e->getMessage()
+                );
+            } catch (Exception $ignored) {
             }
         }
     }
