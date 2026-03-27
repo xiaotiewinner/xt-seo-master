@@ -73,12 +73,8 @@ class XtSeoMaster_Plugin implements Typecho_Plugin_Interface
         // 发布/更新时触发主动推送
         Typecho_Plugin::factory('Widget_Contents_Post_Edit')->finishPublish
             = array('XtSeoMaster_Plugin', 'onPostPublish');
-        Typecho_Plugin::factory('Widget_Contents_Post_Edit')->finishSave
-            = array('XtSeoMaster_Plugin', 'onPostSave');
         Typecho_Plugin::factory('Widget_Contents_Page_Edit')->finishPublish
             = array('XtSeoMaster_Plugin', 'onPagePublish');
-        Typecho_Plugin::factory('Widget_Contents_Page_Edit')->finishSave
-            = array('XtSeoMaster_Plugin', 'onPageSave');
 
         // 在写文章/页面后台底部注入 SEO 评分面板
         Typecho_Plugin::factory('admin/write-post.php')->bottom

@@ -59,7 +59,7 @@ foreach ($logs as $logRow) {
         $logFailed++;
     }
 }
-$recentPushLogs = array_slice($logs, 0, 8);
+$recentPushLogs = array_slice($logs, 0, 100);
 
 $db = Typecho_Db::get();
 $perPage = 20;
@@ -213,7 +213,7 @@ include_once $adminDir . '/menu.php';
                 <div class="xt-card xt-card-failed"><div class="k">失败</div><div class="v"><?php echo intval($logFailed); ?></div></div>
             </div>
             <div class="xt-recent-card">
-                <h4>最近推送记录</h4>
+                <h4>推送记录（仅显示最近100条）</h4>
                 <?php if (empty($recentPushLogs)): ?>
                     <p class="xt-recent-item">暂无推送记录。</p>
                 <?php else: ?>
